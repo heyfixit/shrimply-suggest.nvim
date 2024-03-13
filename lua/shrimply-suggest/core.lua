@@ -3,6 +3,7 @@ local M = {}
 
 -- Plugin configuration
 local config = {
+  enabled = true,
   debounce_time = 200,    -- Debounce time in milliseconds
   get_suggestion_fn = nil -- User-defined function to get suggestions
 }
@@ -11,52 +12,78 @@ local config = {
 local suggestions = {}
 local current_suggestion_index = 1
 local timer = nil
+local last_suggestion_time = 0
+local was_on_last_line = false
+local is_showing_suggestion = false
 
 function M.setup(opts)
   -- Merge user-provided options with default configuration
   config = vim.tbl_deep_extend("force", config, opts or {})
 end
 
--- Update the M.get_mock_suggestions function to generate a single suggestion
-function M.get_mock_suggestion()
-  local random_string = ""
-  for j = 1, 10 do
-    local random_char = string.char(math.random(97, 122)) -- Generate a random lowercase letter
-    random_string = random_string .. random_char
+function M.toggle_suggestions()
+  config.enabled = not config.enabled
+  if not config.enabled then
+    M.clear_suggestion()
+  else
+    M.request_suggestion(true)
   end
-  return "Suggestion " .. (#suggestions + 1) .. ": " .. random_string
 end
 
-function M.request_suggestion()
+function M.get_mock_suggestion()
+  local num_lines = math.random(1, 3)
+  local suggestion = ""
+  for i = 1, num_lines do
+    local random_string = ""
+    for j = 1, 10 do
+      local random_char = string.char(math.random(97, 122)) -- Generate a random lowercase letter
+      random_string = random_string .. random_char
+    end
+    suggestion = suggestion .. "Suggestion " .. (#suggestions + 1) .. " (line " .. i .. "): " .. random_string
+    if i < num_lines then
+      suggestion = suggestion .. "\n"
+    end
+  end
+  return suggestion
+end
+
+function M.request_suggestion(reset_suggestions)
+  -- If suggestions are disabled, return early
+  if not config.enabled then
+    M.clear_suggestion()
+    return
+  end
+
   -- Cancel any existing timer
   if timer then
     timer:stop()
+    timer:close()
     timer = nil
+  end
+
+  -- Reset the suggestion list and index if reset_suggestions is true
+  if reset_suggestions then
+    suggestions = {}
+    current_suggestion_index = 1
   end
 
   -- Start a new timer to debounce the request
   timer = vim.loop.new_timer()
   timer:start(config.debounce_time, 0, vim.schedule_wrap(function()
-    -- Get the text before and after the current position
-    local current_line = vim.api.nvim_get_current_line()
-    local cursor_pos = vim.api.nvim_win_get_cursor(0)[2]
-    local text_before_cursor = current_line:sub(1, cursor_pos)
-    local text_after_cursor = current_line:sub(cursor_pos + 1)
+    if not timer then return end
 
-    -- Check if there is text after the cursor
-    if text_after_cursor:len() > 0 then
-      -- Clear the current suggestion list and displayed suggestion
-      suggestions = {}
-      current_suggestion_index = 1
-      M.clear_suggestion()
-      return
-    end
+    timer:stop()
+    timer:close()
+    timer = nil
+
+    -- Clear the displayed suggestion
+    M.clear_suggestion()
 
     -- Get the suggestion
     local new_suggestion
     if config.get_suggestion_fn then
       -- Use pcall to handle any errors in the user-defined function
-      local success, result = pcall(config.get_suggestion_fn, text_before_cursor, text_after_cursor)
+      local success, result = pcall(config.get_suggestion_fn)
       if success then
         new_suggestion = result
       else
@@ -76,41 +103,66 @@ function M.request_suggestion()
   end))
 end
 
-function M.get_mock_suggestions(text_before_cursor, text_after_cursor)
-  for i = 1, 3 do
-    local random_string = ""
-    for j = 1, 10 do
-      local random_char = string.char(math.random(97, 122)) -- Generate a random lowercase letter
-      random_string = random_string .. random_char
-    end
-    suggestions[i] = "Suggestion " .. i .. ": " .. random_string
-  end
-  return suggestions
-end
-
 function M.show_suggestion()
-  if vim.api.nvim_get_mode().mode == "i" then
-    local suggestion = suggestions[current_suggestion_index]
-    print("show_suggestion #" .. current_suggestion_index .. ": " .. suggestion)
+  if not config.enabled then
+    return
+  end
 
-    -- Clear the previous suggestion
+  if is_showing_suggestion then
+    return
+  end
+
+  is_showing_suggestion = true
+  if vim.api.nvim_get_mode().mode == "i" and #suggestions > 0 then
+    local suggestion = suggestions[current_suggestion_index]
+    if not suggestion then return end
+
+    -- Clear previous suggestions to avoid overlap
     M.clear_suggestion()
 
-    if suggestion then
-      -- Display the suggestion using virtual text at the end of the current line
-      local current_line = vim.api.nvim_get_current_line()
-      vim.api.nvim_buf_set_extmark(0, vim.g.shrimply_suggest_ns, vim.api.nvim_win_get_cursor(0)[1] - 1, #current_line, {
-        virt_text = { { suggestion .. " (" .. current_suggestion_index .. "/" .. #suggestions .. ")", "Comment" } },
-        virt_text_pos = "overlay"
+    local suggestion_lines = vim.split(suggestion, "\n")
+    local cursor_pos = vim.api.nvim_win_get_cursor(0)
+    local line_num = cursor_pos[1] - 1 -- Adjust for Lua index
+
+    -- Add the "(current index / total)" text to the end of the first line if there are multiple suggestions
+    if #suggestions > 1 then
+      local index_text = string.format("(%d/%d)", current_suggestion_index, #suggestions)
+      suggestion_lines[1] = suggestion_lines[1] .. " " .. index_text
+    end
+
+    -- Display the first line as virtual text right after the current cursor position
+    vim.api.nvim_buf_set_extmark(0, vim.g.shrimply_suggest_ns, line_num, cursor_pos[2], {
+      virt_text = { { suggestion_lines[1], "Comment" } },
+      virt_text_pos = "eol", -- Display at the end of the line to mimic inline suggestions
+    })
+
+    -- Set virtual lines for multiline suggestions
+    if #suggestion_lines > 1 then
+      local virt_lines = {}
+      for i = 2, #suggestion_lines do
+        table.insert(virt_lines, { { suggestion_lines[i], "Comment" } })
+      end
+      vim.api.nvim_buf_set_extmark(0, vim.g.shrimply_suggest_ns, line_num, cursor_pos[2], {
+        virt_lines = virt_lines,
+        virt_lines_above = false,
+        hl_mode = "replace",
       })
     end
-  else
-    M.clear_suggestion()
   end
+  is_showing_suggestion = false
+  last_suggestion_time = vim.loop.hrtime()
 end
 
 function M.clear_suggestion()
+  -- Clear all extmarks
   vim.api.nvim_buf_clear_namespace(0, vim.g.shrimply_suggest_ns, 0, -1)
+
+  -- Remove the extra empty line if it was added at the last line
+  if was_on_last_line then
+    local last_line_num = vim.api.nvim_buf_line_count(0)
+    vim.api.nvim_buf_set_lines(0, last_line_num - 1, last_line_num, false, {})
+    was_on_last_line = false
+  end
 end
 
 function M.accept_suggestion()
@@ -120,9 +172,20 @@ function M.accept_suggestion()
       -- Insert the accepted suggestion at the current position
       local cursor_pos = vim.api.nvim_win_get_cursor(0)
       local current_line = vim.api.nvim_get_current_line()
-      local updated_line = current_line:sub(1, cursor_pos[2]) .. suggestion .. current_line:sub(cursor_pos[2] + 1)
-      vim.api.nvim_set_current_line(updated_line)
-      vim.api.nvim_win_set_cursor(0, { cursor_pos[1], cursor_pos[2] + #suggestion })
+      local updated_lines = vim.split(suggestion, "\n")
+      if #updated_lines == 1 then
+        -- Single-line suggestion
+        local updated_line = current_line:sub(1, cursor_pos[2]) .. updated_lines[1]
+        vim.api.nvim_set_current_line(updated_line)
+        vim.api.nvim_win_set_cursor(0, { cursor_pos[1], cursor_pos[2] + #updated_lines[1] })
+      else
+        -- Multi-line suggestion
+        vim.api.nvim_set_current_line(current_line:sub(1, cursor_pos[2]) .. updated_lines[1])
+        for i = 2, #updated_lines do
+          vim.api.nvim_buf_set_lines(0, cursor_pos[1] + i - 2, cursor_pos[1] + i - 2, false, { updated_lines[i] })
+        end
+        vim.api.nvim_win_set_cursor(0, { cursor_pos[1] + #updated_lines - 1, #updated_lines[#updated_lines] })
+      end
     end
     M.clear_suggestion()
     suggestions = {}
@@ -131,15 +194,13 @@ function M.accept_suggestion()
 end
 
 function M.move_to_next_suggestion()
-  print("going to next suggestion")
   if vim.api.nvim_get_mode().mode == "i" then
     if current_suggestion_index < #suggestions then
       current_suggestion_index = current_suggestion_index + 1
-      print("Showing suggestion #" .. current_suggestion_index)
       M.show_suggestion()
     else
-      -- Request a new suggestion if at the last suggestion
-      M.request_suggestion()
+      -- Request a new suggestion without resetting the suggestion list
+      M.request_suggestion(false)
     end
   end
 end
@@ -159,6 +220,9 @@ function M.move_to_previous_suggestion()
   end
 end
 
+-- Clear existing autocommands before setting up new ones
+vim.api.nvim_clear_autocmds({ group = vim.g.shrimply_suggest_ns })
+
 -- Set up autocommands
 vim.api.nvim_create_autocmd({ "InsertEnter" }, {
   callback = function()
@@ -177,14 +241,13 @@ vim.api.nvim_create_autocmd({ "InsertLeave" }, {
   end
 })
 
-vim.api.nvim_create_autocmd({ "TextChangedI" }, {
+vim.api.nvim_create_autocmd({ "TextChangedI", "TextChangedP" }, {
   callback = function()
-    -- Clear the current suggestion list
-    suggestions = {}
-    current_suggestion_index = 1
-
-    M.clear_suggestion()
-    M.request_suggestion()
+    if not config.enabled or is_showing_suggestion or vim.loop.hrtime() - last_suggestion_time < config.debounce_time * 1e6 then
+      return
+    end
+    M.clear_suggestion()       -- Clear the displayed suggestion
+    M.request_suggestion(true) -- Reset suggestions when the user starts typing
   end
 })
 
