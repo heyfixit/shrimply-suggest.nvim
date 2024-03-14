@@ -39,7 +39,9 @@ function M.get_mock_suggestion()
       local random_char = string.char(math.random(97, 122)) -- Generate a random lowercase letter
       random_string = random_string .. random_char
     end
-    suggestion = suggestion .. "Suggestion " .. (#suggestions + 1) .. " (line " .. i .. "): " .. random_string
+    suggestion = suggestion ..
+    "This is a mock suggestion you should define your own get_suggestion_fn " ..
+    (#suggestions + 1) .. " (line " .. i .. "): " .. random_string
     if i < num_lines then
       suggestion = suggestion .. "\n"
     end
