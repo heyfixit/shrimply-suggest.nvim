@@ -4,9 +4,9 @@ local M = {}
 -- Plugin configuration
 local config = {
   enabled = true,
-  debounce_time = 500,                               -- Debounce time in milliseconds
-  command_generator_fn = nil,                        -- User-defined function to generate the command string
-  code_filetypes = { "lua", "python", "javascript" } -- Default code-related filetypes
+  debounce_time = 500, -- Debounce time in milliseconds
+  command_generator_fn = nil, -- User-defined function to generate the command string
+  code_filetypes = { "lua", "python", "javascript" }, -- Default code-related filetypes
 }
 
 -- Suggestion state
@@ -42,9 +42,13 @@ function M.get_mock_suggestion()
       local random_char = string.char(math.random(97, 122)) -- Generate a random lowercase letter
       random_string = random_string .. random_char
     end
-    suggestion = suggestion ..
-        "This is a mock suggestion you should define your own command_generator_fn" ..
-        (#suggestions + 1) .. " (line " .. i .. "): " .. random_string
+    suggestion = suggestion
+      .. "This is a mock suggestion you should define your own command_generator_fn"
+      .. (#suggestions + 1)
+      .. " (line "
+      .. i
+      .. "): "
+      .. random_string
     if i < num_lines then
       suggestion = suggestion .. "\n"
     end
@@ -74,79 +78,85 @@ function M.request_suggestion(reset_suggestions)
 
   -- Start a new timer to debounce the request
   timer = vim.loop.new_timer()
-  timer:start(config.debounce_time, 0, vim.schedule_wrap(function()
-    if not timer then return end
-
-    timer:stop()
-    timer:close()
-    timer = nil
-
-    -- Clear the displayed suggestion
-    M.clear_suggestion()
-
-    -- Get the suggestion
-    local new_suggestion
-    if config.command_generator_fn then
-      -- Generate the command string using the user-defined function
-      local command = config.command_generator_fn()
-
-      -- Cancel the current job if it exists
-      if current_job then
-        vim.fn.jobstop(current_job)
-        table.insert(stopped_jobs, current_job)
+  timer:start(
+    config.debounce_time,
+    0,
+    vim.schedule_wrap(function()
+      if not timer then
+        return
       end
 
-      -- Start a new job to execute the command
-      current_job = vim.fn.jobstart(command, {
-        stdout_buffered = true,
-        on_stdout = function(job_id, data)
-          -- The 'data' is now a single-element table containing the entire output
-          local output = data[1]
-          local result = vim.fn.json_decode(output)
+      timer:stop()
+      timer:close()
+      timer = nil
 
-          if result.error then
-            print("Error in command output: " .. result.error)
-          else
-            new_suggestion = result.response
-          end
+      -- Clear the displayed suggestion
+      M.clear_suggestion()
 
-          current_job = nil
-        end,
-        on_stderr = function(job_id, data)
-          if not vim.tbl_contains(stopped_jobs, job_id) then
-            local error_message = data[1] or ""
-            if error_message ~= "" then
-              print("Command error: " .. error_message)
+      -- Get the suggestion
+      local new_suggestion
+      if config.command_generator_fn then
+        -- Generate the command string using the user-defined function
+        local command = config.command_generator_fn()
+
+        -- Cancel the current job if it exists
+        if current_job then
+          vim.fn.jobstop(current_job)
+          table.insert(stopped_jobs, current_job)
+        end
+
+        -- Start a new job to execute the command
+        current_job = vim.fn.jobstart(command, {
+          stdout_buffered = true,
+          on_stdout = function(_, data)
+            -- The 'data' is now a single-element table containing the entire output
+            local output = data[1]
+            local result = vim.fn.json_decode(output)
+
+            if result.error then
+              print("Error in command output: " .. result.error)
+            else
+              new_suggestion = result.response
             end
-          end
-        end,
-        on_exit = function(job_id)
-          if vim.tbl_contains(stopped_jobs, job_id) then
-            -- Remove the job ID from the list of stopped jobs
-            for i, v in ipairs(stopped_jobs) do
-              if v == job_id then
-                table.remove(stopped_jobs, i)
-                break
+
+            current_job = nil
+          end,
+          on_stderr = function(job_id, data)
+            if not vim.tbl_contains(stopped_jobs, job_id) then
+              local error_message = data[1] or ""
+              if error_message ~= "" then
+                print("Command error: " .. error_message)
               end
             end
-          else
-            current_job = nil
-            table.insert(suggestions, new_suggestion)
-            current_suggestion_index = #suggestions
-            M.show_suggestion()
-          end
-        end,
-      })
-    else
-      new_suggestion = M.get_mock_suggestion()
+          end,
+          on_exit = function(job_id)
+            if vim.tbl_contains(stopped_jobs, job_id) then
+              -- Remove the job ID from the list of stopped jobs
+              for i, v in ipairs(stopped_jobs) do
+                if v == job_id then
+                  table.remove(stopped_jobs, i)
+                  break
+                end
+              end
+            else
+              current_job = nil
+              table.insert(suggestions, new_suggestion)
+              current_suggestion_index = #suggestions
+              M.show_suggestion()
+            end
+          end,
+        })
+      else
+        new_suggestion = M.get_mock_suggestion()
 
-      -- Insert the suggestion into the suggestions array
-      table.insert(suggestions, new_suggestion)
+        -- Insert the suggestion into the suggestions array
+        table.insert(suggestions, new_suggestion)
 
-      current_suggestion_index = #suggestions
-      M.show_suggestion()
-    end
-  end))
+        current_suggestion_index = #suggestions
+        M.show_suggestion()
+      end
+    end)
+  )
 end
 
 function M.show_suggestion()
@@ -161,7 +171,9 @@ function M.show_suggestion()
   is_showing_suggestion = true
   if vim.api.nvim_get_mode().mode == "i" and #suggestions > 0 then
     local suggestion = suggestions[current_suggestion_index]
-    if not suggestion then return end
+    if not suggestion then
+      return
+    end
 
     -- Clear previous suggestions to avoid overlap
     M.clear_suggestion()
@@ -200,8 +212,10 @@ function M.show_suggestion()
 end
 
 function M.clear_suggestion()
-  -- Clear all extmarks
-  vim.api.nvim_buf_clear_namespace(0, vim.g.shrimply_suggest_ns, 0, -1)
+  -- Check if the namespace ID exists before clearing it
+  if vim.g.shrimply_suggest_ns and type(vim.g.shrimply_suggest_ns) == "number" then
+    vim.api.nvim_buf_clear_namespace(0, vim.g.shrimply_suggest_ns, 0, -1)
+  end
 
   -- Remove the extra empty line if it was added at the last line
   if was_on_last_line then
@@ -275,7 +289,7 @@ vim.api.nvim_create_autocmd({ "InsertEnter" }, {
       vim.g.shrimply_suggest_ns = vim.api.nvim_create_namespace("ShrimplySuggest")
       M.request_suggestion()
     end
-  end
+  end,
 })
 
 vim.api.nvim_create_autocmd({ "InsertLeave" }, {
@@ -288,20 +302,24 @@ vim.api.nvim_create_autocmd({ "InsertLeave" }, {
         timer = nil
       end
     end
-  end
+  end,
 })
 
 vim.api.nvim_create_autocmd({ "TextChangedI", "TextChangedP" }, {
   callback = function()
     local filetype = vim.bo.filetype
     if vim.tbl_contains(config.code_filetypes, filetype) then
-      if not config.enabled or is_showing_suggestion or vim.loop.hrtime() - last_suggestion_time < config.debounce_time * 1e6 then
+      if
+        not config.enabled
+        or is_showing_suggestion
+        or vim.loop.hrtime() - last_suggestion_time < config.debounce_time * 1e6
+      then
         return
       end
-      M.clear_suggestion()       -- Clear the displayed suggestion
+      M.clear_suggestion() -- Clear the displayed suggestion
       M.request_suggestion(true) -- Reset suggestions when the user starts typing
     end
-  end
+  end,
 })
 
 return M
