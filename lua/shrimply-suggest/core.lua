@@ -4,8 +4,9 @@ local M = {}
 -- Plugin configuration
 local config = {
   enabled = true,
-  debounce_time = 500,       -- Debounce time in milliseconds
-  command_generator_fn = nil -- User-defined function to generate the command string
+  debounce_time = 500,                               -- Debounce time in milliseconds
+  command_generator_fn = nil,                        -- User-defined function to generate the command string
+  code_filetypes = { "lua", "python", "javascript" } -- Default code-related filetypes
 }
 
 -- Suggestion state
@@ -269,28 +270,37 @@ vim.api.nvim_clear_autocmds({ group = vim.g.shrimply_suggest_ns })
 -- Set up autocommands
 vim.api.nvim_create_autocmd({ "InsertEnter" }, {
   callback = function()
-    vim.g.shrimply_suggest_ns = vim.api.nvim_create_namespace("ShrimplySuggest")
-    M.request_suggestion()
+    local filetype = vim.bo.filetype
+    if vim.tbl_contains(config.code_filetypes, filetype) then
+      vim.g.shrimply_suggest_ns = vim.api.nvim_create_namespace("ShrimplySuggest")
+      M.request_suggestion()
+    end
   end
 })
 
 vim.api.nvim_create_autocmd({ "InsertLeave" }, {
   callback = function()
-    M.clear_suggestion()
-    if timer then
-      timer:stop()
-      timer = nil
+    local filetype = vim.bo.filetype
+    if vim.tbl_contains(config.code_filetypes, filetype) then
+      M.clear_suggestion()
+      if timer then
+        timer:stop()
+        timer = nil
+      end
     end
   end
 })
 
 vim.api.nvim_create_autocmd({ "TextChangedI", "TextChangedP" }, {
   callback = function()
-    if not config.enabled or is_showing_suggestion or vim.loop.hrtime() - last_suggestion_time < config.debounce_time * 1e6 then
-      return
+    local filetype = vim.bo.filetype
+    if vim.tbl_contains(config.code_filetypes, filetype) then
+      if not config.enabled or is_showing_suggestion or vim.loop.hrtime() - last_suggestion_time < config.debounce_time * 1e6 then
+        return
+      end
+      M.clear_suggestion()       -- Clear the displayed suggestion
+      M.request_suggestion(true) -- Reset suggestions when the user starts typing
     end
-    M.clear_suggestion()       -- Clear the displayed suggestion
-    M.request_suggestion(true) -- Reset suggestions when the user starts typing
   end
 })
 
