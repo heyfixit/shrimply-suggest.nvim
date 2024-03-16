@@ -1,4 +1,6 @@
--- init.dev.lua
+-- this file is loaded by scripts/dev.sh as the sole config file
+-- for that instance of nvim
+-- be sure to copy it to `init.dev.lua` (which is gitignored)
 
 local shrimply_suggest = require('shrimply-suggest')
 

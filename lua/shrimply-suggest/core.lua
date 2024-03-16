@@ -4,8 +4,8 @@ local M = {}
 -- Plugin configuration
 local config = {
   enabled = true,
-  debounce_time = 200,    -- Debounce time in milliseconds
-  get_suggestion_fn = nil -- User-defined function to get suggestions
+  debounce_time = 500,       -- Debounce time in milliseconds
+  command_generator_fn = nil -- User-defined function to generate the command string
 }
 
 -- Suggestion state
@@ -15,6 +15,8 @@ local timer = nil
 local last_suggestion_time = 0
 local was_on_last_line = false
 local is_showing_suggestion = false
+local current_job = nil
+local stopped_jobs = {}
 
 function M.setup(opts)
   -- Merge user-provided options with default configuration
@@ -40,8 +42,8 @@ function M.get_mock_suggestion()
       random_string = random_string .. random_char
     end
     suggestion = suggestion ..
-    "This is a mock suggestion you should define your own get_suggestion_fn " ..
-    (#suggestions + 1) .. " (line " .. i .. "): " .. random_string
+        "This is a mock suggestion you should define your own command_generator_fn" ..
+        (#suggestions + 1) .. " (line " .. i .. "): " .. random_string
     if i < num_lines then
       suggestion = suggestion .. "\n"
     end
@@ -83,25 +85,66 @@ function M.request_suggestion(reset_suggestions)
 
     -- Get the suggestion
     local new_suggestion
-    if config.get_suggestion_fn then
-      -- Use pcall to handle any errors in the user-defined function
-      local success, result = pcall(config.get_suggestion_fn)
-      if success then
-        new_suggestion = result
-      else
-        -- If an error occurs, print an error message and return
-        print("Error in get_suggestion_fn: " .. result)
-        return
+    if config.command_generator_fn then
+      -- Generate the command string using the user-defined function
+      local command = config.command_generator_fn()
+
+      -- Cancel the current job if it exists
+      if current_job then
+        vim.fn.jobstop(current_job)
+        table.insert(stopped_jobs, current_job)
       end
+
+      -- Start a new job to execute the command
+      current_job = vim.fn.jobstart(command, {
+        stdout_buffered = true,
+        on_stdout = function(job_id, data)
+          -- The 'data' is now a single-element table containing the entire output
+          local output = data[1]
+          local result = vim.fn.json_decode(output)
+
+          if result.error then
+            print("Error in command output: " .. result.error)
+          else
+            new_suggestion = result.response
+          end
+
+          current_job = nil
+        end,
+        on_stderr = function(job_id, data)
+          if not vim.tbl_contains(stopped_jobs, job_id) then
+            local error_message = data[1] or ""
+            if error_message ~= "" then
+              print("Command error: " .. error_message)
+            end
+          end
+        end,
+        on_exit = function(job_id)
+          if vim.tbl_contains(stopped_jobs, job_id) then
+            -- Remove the job ID from the list of stopped jobs
+            for i, v in ipairs(stopped_jobs) do
+              if v == job_id then
+                table.remove(stopped_jobs, i)
+                break
+              end
+            end
+          else
+            current_job = nil
+            table.insert(suggestions, new_suggestion)
+            current_suggestion_index = #suggestions
+            M.show_suggestion()
+          end
+        end,
+      })
     else
       new_suggestion = M.get_mock_suggestion()
+
+      -- Insert the suggestion into the suggestions array
+      table.insert(suggestions, new_suggestion)
+
+      current_suggestion_index = #suggestions
+      M.show_suggestion()
     end
-
-    -- Insert the suggestion into the suggestions array
-    table.insert(suggestions, new_suggestion)
-
-    current_suggestion_index = #suggestions
-    M.show_suggestion()
   end))
 end
 
@@ -208,11 +251,9 @@ function M.move_to_next_suggestion()
 end
 
 function M.move_to_previous_suggestion()
-  print("going to previous suggestion")
   if vim.api.nvim_get_mode().mode == "i" then
     if current_suggestion_index > 1 then
       current_suggestion_index = current_suggestion_index - 1
-      print("Showing suggestion #" .. current_suggestion_index)
       M.show_suggestion()
     else
       -- Cycle to the last suggestion if at the first suggestion
