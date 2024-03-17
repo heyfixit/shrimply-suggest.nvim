@@ -1,6 +1,9 @@
 -- lua/shrimply-suggest/core.lua
 local M = {}
 
+-- Create a namespace for the plugin
+local ns_id = vim.api.nvim_create_namespace("ShrimplySuggest")
+
 -- Plugin configuration
 local config = {
   enabled = true,
@@ -279,10 +282,11 @@ function M.move_to_previous_suggestion()
 end
 
 -- Clear existing autocommands before setting up new ones
-vim.api.nvim_clear_autocmds({ group = vim.g.shrimply_suggest_ns })
+vim.api.nvim_clear_autocmds({ group = ns_id })
 
 -- Set up autocommands
 vim.api.nvim_create_autocmd({ "InsertEnter" }, {
+  group = ns_id,
   callback = function()
     local filetype = vim.bo.filetype
     if vim.tbl_contains(config.code_filetypes, filetype) then
@@ -293,6 +297,7 @@ vim.api.nvim_create_autocmd({ "InsertEnter" }, {
 })
 
 vim.api.nvim_create_autocmd({ "InsertLeave" }, {
+  group = ns_id,
   callback = function()
     local filetype = vim.bo.filetype
     if vim.tbl_contains(config.code_filetypes, filetype) then
@@ -306,6 +311,7 @@ vim.api.nvim_create_autocmd({ "InsertLeave" }, {
 })
 
 vim.api.nvim_create_autocmd({ "TextChangedI", "TextChangedP" }, {
+  group = ns_id,
   callback = function()
     local filetype = vim.bo.filetype
     if vim.tbl_contains(config.code_filetypes, filetype) then
