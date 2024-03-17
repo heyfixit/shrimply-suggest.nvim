@@ -1,6 +1,8 @@
 -- lua/shrimply-suggest/core.lua
 local M = {}
 
+-- Create a simple function that prints "Hello World"
+
 -- Create a namespace for the plugin
 local ns_id = vim.api.nvim_create_namespace("ShrimplySuggest")
 
@@ -114,12 +116,15 @@ function M.request_suggestion(reset_suggestions)
           on_stdout = function(_, data)
             -- The 'data' is now a single-element table containing the entire output
             local output = data[1]
-            local result = vim.fn.json_decode(output)
 
-            if result.error then
-              print("Error in command output: " .. result.error)
-            else
-              new_suggestion = result.response
+            if output then
+              local result = vim.fn.json_decode(output)
+
+              if result.error then
+                print("Error in command output: " .. result.error)
+              else
+                new_suggestion = result.response
+              end
             end
 
             current_job = nil

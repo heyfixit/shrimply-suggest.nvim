@@ -24,7 +24,7 @@ local shrimply_suggest = require("shrimply-suggest")
 shrimply_suggest.setup({
   enabled = true,
   debounce_time = 500, -- Debounce time in milliseconds
-  command_generator_fn = nil, -- User-defined function to generate the command string
+  command_generator_fn = nil, -- User-defined function to generate the command string or table
   code_filetypes = { "lua", "python", "javascript" }, -- Default code-related filetypes
 })
 ```
@@ -41,7 +41,7 @@ The `command` is expected to output a `json` string in the form:
 }
 ```
 
-A lot is left to user configuration here, it is up to you to produce the proper command string, whether it's `curl`,
+A lot is left to user configuration here, it is up to you to produce the proper command string or table, whether it's `curl`,
 `ollama`, or something else.
 
 ## Keymappings
@@ -120,9 +120,9 @@ require("lazy").setup({
         )
 
         -- API request parameters
-        local url = "http://YOUR_OLLAMA_URL/api/generate"
+        local url = config.url
         local data = {
-          model = model.name,
+          model = "starcoder2:7b",
           prompt = prompt,
           stream = false,
           options = {
@@ -136,12 +136,18 @@ require("lazy").setup({
           },
         }
 
-        -- Build the curl command string
-        local curl_cmd = string.format("curl -s '%s' -d '%s'", url, vim.fn.json_encode(data))
+        -- Encode the data as JSON
+        local json_data = vim.fn.json_encode(data)
 
-        -- Return the command string
-        return curl_cmd
-      end,
+        -- Return the command and options as a table
+        return {
+          "curl",
+          url,
+          "-s",
+          "-d",
+          json_data,
+        }
+      end
     })
 
     -- Define custom keymappings
@@ -254,7 +260,7 @@ shrimply_suggest.setup({
     local prompt = format(model.prompt_format, prompt_values)
 
     -- API request parameters
-    local url = "http://YOUR_OLLAMA_URL/api/generate"
+    local url = config.url
     local data = {
       model = "starcoder2:7b",
       prompt = prompt,
@@ -270,14 +276,17 @@ shrimply_suggest.setup({
       },
     }
 
-    -- Build the curl command string
-    -- We're fortunate that we know the ollama api returns JSON in our desired format of:
-    -- { "response": "some response", "error": "some error reason" }
-    -- So we don't need to complicate the command to do any reformatting of the output
-    local curl_cmd = string.format("curl -s '%s' -d '%s'", url, vim.fn.json_encode(data))
+    -- Encode the data as JSON
+    local json_data = vim.fn.json_encode(data)
 
-    -- Return the command string
-    return curl_cmd
+    -- Return the command and options as a table
+    return {
+      "curl",
+      url,
+      "-s",
+      "-d",
+      json_data,
+    }
   end,
 })
 
