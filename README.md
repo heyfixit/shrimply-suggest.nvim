@@ -47,7 +47,7 @@ A lot is left to user configuration here, it is up to you to produce the proper 
 ## Keymappings
 
 ```lua
--- Define custom keymappings
+-- 3 main keymappings that should be defined
 vim.api.nvim_set_keymap("i", "<M-l>", "", {
   noremap = true,
   silent = true,
@@ -67,10 +67,109 @@ vim.api.nvim_set_keymap("i", "<M-[>", "", {
 })
 ```
 
-## Example Generator Function
+## Example Generator Functions
+
+### Remote Ollama Starcoder2
+```lua
+-- using lazy.nvim for plugin management
+require("lazy").setup({
+  "https://github.com/heyfixit/shrimply-suggest.nvim",
+  config = function()
+    local shrimply_suggest = require("shrimply-suggest")
+
+    -- Initialize model configuration
+    local model = {
+      name = "starcoder2:7b",
+      prompt_format = "<repo_name>%s\n<fim_sep>%s\n<fim_prefix>\n%s%s\n<fim_suffix>\n%s\n<fim_middle>",
+      stop_sequences = { "<fim_sep>", "<|endoftext|>", "<fim_prefix>", "<fim_suffix>", "<fim_middle>", "<repo_name>" },
+    }
+
+    shrimply_suggest.setup({
+      command_generator_fn = function()
+        -- Get the current buffer and cursor position
+        local bufnr = vim.api.nvim_get_current_buf()
+        local cursor_pos = vim.api.nvim_win_get_cursor(0)
+        local current_line = cursor_pos[1] - 1
+
+        -- Get the project root directory
+        local repo_name = vim.fn.fnamemodify(vim.fn.getcwd(), ":t") or ""
+
+        -- Get the relative path to the current file
+        local file_path = vim.fn.expand("%:.") or ""
+
+        -- Get the lines above and below the current line
+        local lines_above = vim.api.nvim_buf_get_lines(bufnr, math.max(0, current_line - 30), current_line, false)
+        local lines_below = vim.api.nvim_buf_get_lines(
+          bufnr,
+          current_line + 1,
+          math.min(current_line + 51, vim.api.nvim_buf_line_count(bufnr)),
+          false
+        )
+
+        -- Get the text on the current line up to the cursor position
+        local current_line_text = vim.api.nvim_get_current_line():sub(1, cursor_pos[2])
+
+        -- Construct the prompt message based on the model's prompt format
+        local prompt = string.format(
+          model.prompt_format,
+          repo_name,
+          file_path,
+          table.concat(lines_above or {}, "\n"),
+          current_line_text,
+          table.concat(lines_below or {}, "\n")
+        )
+
+        -- API request parameters
+        local url = "http://YOUR_OLLAMA_URL/api/generate"
+        local data = {
+          model = model.name,
+          prompt = prompt,
+          stream = false,
+          options = {
+            num_predict = 100,
+            top_k = 20,
+            top_p = 0.5,
+            temperature = 0.2,
+            repeat_penalty = 1.1,
+            stop = model.stop_sequences,
+            num_gpu = 1,
+          },
+        }
+
+        -- Build the curl command string
+        local curl_cmd = string.format("curl -s '%s' -d '%s'", url, vim.fn.json_encode(data))
+
+        -- Return the command string
+        return curl_cmd
+      end,
+    })
+
+    -- Define custom keymappings
+    vim.api.nvim_set_keymap("i", "<M-l>", "", {
+      noremap = true,
+      silent = true,
+      callback = shrimply_suggest.accept_suggestion,
+    })
+
+    vim.api.nvim_set_keymap("i", "<M-]>", "", {
+      noremap = true,
+      silent = true,
+      callback = shrimply_suggest.move_to_next_suggestion,
+    })
+
+    vim.api.nvim_set_keymap("i", "<M-[>", "", {
+      noremap = true,
+      silent = true,
+      callback = shrimply_suggest.move_to_previous_suggestion,
+    })
+  end,
+})
+```
+
+
+### Automatic Model Swapping and Stats tracking
 Let's say you weren't sure which model you'd prefer. This example will switch models every 20 suggestions either accepted or skipped.
-It will track statistics on how many you accept vs how many you skip.
-The idea here is to hopefully derive some certainty as to which model you prefer.
+It will write statistics to a json file on how many you accept vs how many you skip for each model.
 
 ```lua
 -- mimic something like python's named placeholder formatting
@@ -88,7 +187,7 @@ local shrimply_suggest = require("shrimply-suggest")
 local models = {
   {
     name = "starcoder2:7b",
-    prompt_format = "{repo_name}\n{file_path}\n<fim_prefix>\n{lines_before}{current_line}\n<fim_suffix>\n{lines_after}\n<fim_middle>",
+    prompt_format = "<repo_name>{repo_name}\n<fim_sep>{file_path}\n<fim_prefix>\n{lines_before}{current_line}\n<fim_suffix>\n{lines_after}\n<fim_middle>",
     stop_sequences = { "<fim_sep>", "<|endoftext|>", "<fim_prefix>", "<fim_suffix>", "<fim_middle>", "<repo_name>" },
   },
   {
